@@ -523,6 +523,11 @@
         run: false,
         to: [4, 4],
         ot: false,
+        otFirst: null,
+        otPossessions: [0, 0],
+        otSuddenDeath: false,
+        otOpeningFGTeam: null,
+        otGameOver: false,
         clockHoldRound: false,
         log: [],
         hist: [],
@@ -543,6 +548,11 @@
         puntHoles = 0;
       if (S.clockHoldRound == null) S.clockHoldRound = false;
       if (S.quarterRoundFinished == null) S.quarterRoundFinished = false;
+      if (S.otFirst == null) S.otFirst = null;
+      if (!Array.isArray(S.otPossessions)) S.otPossessions = [0, 0];
+      if (S.otSuddenDeath == null) S.otSuddenDeath = false;
+      if (S.otOpeningFGTeam == null) S.otOpeningFGTeam = null;
+      if (S.otGameOver == null) S.otGameOver = false;
       if (!Array.isArray(S.to)) S.to = S.ot ? [3, 3] : [4, 4];
       if (!S.stats) S.stats = blankStats();
       S.stats.forEach((s) => {
@@ -700,6 +710,77 @@
         S.drive = S.ball;
         S.kick = false;
       }
+      function endOT(winner, reason) {
+        S.otGameOver = true;
+        stop();
+        S.log.push(
+          "<b>OVERTIME GAME OVER:</b> " +
+            S.names[winner] +
+            " wins" +
+            (reason ? " — " + reason : "") +
+            ".",
+        );
+        render();
+        alert(
+          S.names[winner] +
+            " wins in overtime" +
+            (reason ? " — " + reason : "") +
+            "!",
+        );
+      }
+      function otPossessionEnded(team, scoredType) {
+        if (!S.ot || S.otGameOver) return false;
+        S.otPossessions[team]++;
+        if (scoredType === "TD") {
+          endOT(team, "touchdown");
+          return true;
+        }
+        if (scoredType === "SAFETY") {
+          endOT(team, "safety");
+          return true;
+        }
+        if (S.otSuddenDeath) {
+          if (scoredType === "FG") {
+            endOT(team, "field goal in sudden death");
+            return true;
+          }
+          return false;
+        }
+        if (scoredType === "FG") {
+          if (S.otOpeningFGTeam == null) {
+            S.otOpeningFGTeam = team;
+            S.log.push(
+              "<b>OVERTIME:</b> " +
+                S.names[1 - team] +
+                " gets one possession to tie with a field goal or win with a touchdown.",
+            );
+          } else if (S.otOpeningFGTeam !== team) {
+            S.otSuddenDeath = true;
+            S.log.push(
+              "<b>OVERTIME:</b> Both teams made field goals. Next score wins.",
+            );
+          }
+          return false;
+        }
+        if (
+          S.otPossessions[0] > 0 &&
+          S.otPossessions[1] > 0 &&
+          S.score[0] === S.score[1]
+        ) {
+          S.otSuddenDeath = true;
+          S.log.push(
+            "<b>OVERTIME:</b> Both teams have had an offensive possession and the game is still tied. Next score wins.",
+          );
+        } else if (
+          S.otOpeningFGTeam != null &&
+          team !== S.otOpeningFGTeam &&
+          S.score[team] < S.score[S.otOpeningFGTeam]
+        ) {
+          endOT(S.otOpeningFGTeam, "opponent failed to answer the field goal");
+          return true;
+        }
+        return false;
+      }
       function apply(y) {
         let o = S.pos;
         S.ball += dir() * y;
@@ -719,6 +800,7 @@
         } else if (S.down >= 4) {
           S.stats[o].turnoversOnDowns++;
           S.log.push("<b>TURNOVER ON DOWNS</b> at " + spotText());
+          if (S.ot && otPossessionEnded(o, null)) return;
           switchPos();
         } else S.down++;
       }
@@ -785,6 +867,8 @@
           "<b>TURNOVER:</b> defensive bag knocked an offensive bag off the board and went in the hole at " +
             spotText(),
         );
+        let oldOffense = S.pos;
+        if (S.ot && otPossessionEnded(oldOffense, null)) return;
         switchPos();
         render();
       }
@@ -796,6 +880,10 @@
         S.kick = true;
         S.log.push("<b>TOUCHDOWN " + S.names[t] + "!</b> +6");
         stop();
+        if (S.ot) {
+          otPossessionEnded(t, "TD");
+          return;
+        }
         render();
         conversion();
       }
@@ -803,6 +891,11 @@
         let offense = S.pos,
           defense = 1 - offense;
         S.score[defense] += 2;
+        if (S.ot) {
+          S.log.push("<b>SAFETY!</b> " + S.names[defense] + " +2.");
+          otPossessionEnded(defense, "SAFETY");
+          return;
+        }
         S.log.push(
           "<b>SAFETY!</b> " +
             S.names[defense] +
@@ -919,7 +1012,7 @@
             spotText(),
         );
         closeM("pick");
-        if (S.sec > 0) startClock();
+        if (!S.ot && S.sec > 0) startClock();
         render();
       }
       function airResolve(n) {
@@ -1012,6 +1105,8 @@
               ? "Punt pinned at the 1-yard line."
               : ""),
         );
+        if (S.ot) otPossessionEnded(p, null);
+        if (S.otGameOver) return;
         S.pos = receiver;
         S.down = 1;
         S.gain = Math.max(0, Math.min(100, S.ball + dir() * 10));
@@ -1043,6 +1138,9 @@
           S.stats[t].fieldGoalsMade++;
           S.score[t] += 3;
           S.log.push("<b>FIELD GOAL GOOD!</b> +3");
+          if (S.ot) {
+            if (otPossessionEnded(t, "FG")) return;
+          }
           S.pos = 1 - t;
           S.kick = true;
           closeM("pick");
@@ -1050,6 +1148,7 @@
           airmail("kickoff");
         } else {
           S.log.push("<b>FIELD GOAL NO GOOD.</b> Turnover at " + spotText());
+          if (S.ot && otPossessionEnded(t, null)) return;
           switchPos();
           closeM("pick");
           render();
@@ -1274,7 +1373,7 @@
         r.readAsText(f);
       }
       function startClock() {
-        if (S.sec <= 0) return;
+        if (S.ot || S.sec <= 0) return;
         S.run = true;
         clearInterval(timer);
         timer = setInterval(() => {
@@ -1327,12 +1426,60 @@
         } else if (S.score[0] == S.score[1]) {
           S.ot = true;
           S.to = [3, 3];
-          S.sec = 1200;
+          S.sec = 0;
+          S.run = false;
           S.clockHoldRound = false;
           S.quarterRoundFinished = false;
-          S.log.push("<b>OVERTIME</b>");
+          S.otFirst = null;
+          S.otPossessions = [0, 0];
+          S.otSuddenDeath = false;
+          S.otOpeningFGTeam = null;
+          S.otGameOver = false;
+          S.log.push(
+            "<b>OVERTIME</b> — no time limit. Rock, Paper, Scissors determines who chooses to kick or receive.",
+          );
           render();
+          overtimeSetup();
         } else alert("Game over.");
+      }
+      function overtimeSetup() {
+        picktitle.textContent = "Overtime — Rock, Paper, Scissors";
+        picktext.textContent =
+          "Select the team that won Rock, Paper, Scissors.";
+        choices.innerHTML =
+          '<button class="btn" onclick="overtimeWinner(0)">' +
+          S.names[0] +
+          '</button><button class="btn" onclick="overtimeWinner(1)">' +
+          S.names[1] +
+          "</button>";
+        pick.classList.add("show");
+      }
+      function overtimeWinner(winner) {
+        picktitle.textContent = S.names[winner] + " won";
+        picktext.textContent = "Choose to receive or kick.";
+        choices.innerHTML =
+          '<button class="btn primary" onclick="startOvertime(' +
+          winner +
+          ')">RECEIVE</button><button class="btn" onclick="startOvertime(' +
+          (1 - winner) +
+          ')">KICK</button>';
+      }
+      function startOvertime(receiver) {
+        S.otFirst = receiver;
+        S.pos = receiver;
+        S.kick = true;
+        S.ball = receiver === 0 ? 40 : 60;
+        S.down = 1;
+        S.gain = Math.max(0, Math.min(100, S.ball + dir() * 10));
+        S.drive = S.ball;
+        S.log.push(
+          "<b>OVERTIME START:</b> " +
+            S.names[receiver] +
+            " receives the kickoff.",
+        );
+        closeM("pick");
+        render();
+        airmail("kickoff");
       }
       function undo() {
         if (!S.hist.length) return;
