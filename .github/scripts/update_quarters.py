@@ -3,167 +3,142 @@ from pathlib import Path
 p = Path('index.html')
 s = p.read_text()
 
-# Add overtime state fields.
-s = s.replace('ot: false,\n        clockHoldRound: false,', 'ot: false,\n        otFirst: null,\n        otPossessions: [0, 0],\n        otSuddenDeath: false,\n        otOpeningFGTeam: null,\n        otGameOver: false,\n        clockHoldRound: false,')
-s = s.replace('if (S.quarterRoundFinished == null) S.quarterRoundFinished = false;', 'if (S.quarterRoundFinished == null) S.quarterRoundFinished = false;\n      if (S.otFirst == null) S.otFirst = null;\n      if (!Array.isArray(S.otPossessions)) S.otPossessions = [0, 0];\n      if (S.otSuddenDeath == null) S.otSuddenDeath = false;\n      if (S.otOpeningFGTeam == null) S.otOpeningFGTeam = null;\n      if (S.otGameOver == null) S.otGameOver = false;', 1)
+# Add Penalty button to game actions.
+old_btn = '<button class="btn red" onclick="turnover()">Turnover</button\n            ><button class="btn" onclick="timeout()">Timeout</button'
+new_btn = '<button class="btn red" onclick="turnover()">Turnover</button\n            ><button class="btn gold" onclick="penalty()">Penalty</button\n            ><button class="btn" onclick="timeout()">Timeout</button'
+if old_btn not in s:
+    raise SystemExit('Could not find game action buttons')
+s = s.replace(old_btn, new_btn)
 
-# Overtime helper functions inserted before apply().
-needle = '      function apply(y) {'
-helpers = '''      function endOT(winner, reason) {
-        S.otGameOver = true;
-        stop();
-        S.log.push("<b>OVERTIME GAME OVER:</b> " + S.names[winner] + " wins" + (reason ? " — " + reason : "") + ".");
-        render();
-        alert(S.names[winner] + " wins in overtime" + (reason ? " — " + reason : "") + "!");
-      }
-      function otPossessionEnded(team, scoredType) {
-        if (!S.ot || S.otGameOver) return false;
-        S.otPossessions[team]++;
-        if (scoredType === "TD") {
-          endOT(team, "touchdown");
-          return true;
-        }
-        if (scoredType === "SAFETY") {
-          endOT(team, "safety");
-          return true;
-        }
-        if (S.otSuddenDeath) {
-          if (scoredType === "FG") {
-            endOT(team, "field goal in sudden death");
-            return true;
+# Penalty helpers before timeout().
+needle = '      function timeout() {'
+penalty_code = '''      function enforcePenaltyYards(team, yards) {
+        let offense = S.pos;
+        let movement = team === offense ? -yards : yards;
+        S.ball += dir() * movement;
+        if (S.ball >= 100 || S.ball <= 0) {
+          if ((offense === 0 && S.ball >= 100) || (offense === 1 && S.ball <= 0)) {
+            S.ball = offense === 0 ? 100 : 0;
+            td();
+          } else {
+            safety();
           }
-          return false;
+          return;
         }
-        if (scoredType === "FG") {
-          if (S.otOpeningFGTeam == null) {
-            S.otOpeningFGTeam = team;
-            S.log.push("<b>OVERTIME:</b> " + S.names[1 - team] + " gets one possession to tie with a field goal or win with a touchdown.");
-          } else if (S.otOpeningFGTeam !== team) {
-            S.otSuddenDeath = true;
-            S.log.push("<b>OVERTIME:</b> Both teams made field goals. Next score wins.");
-          }
-          return false;
-        }
-        if (S.otPossessions[0] > 0 && S.otPossessions[1] > 0 && S.score[0] === S.score[1]) {
-          S.otSuddenDeath = true;
-          S.log.push("<b>OVERTIME:</b> Both teams have had an offensive possession and the game is still tied. Next score wins.");
-        } else if (S.otOpeningFGTeam != null && team !== S.otOpeningFGTeam && S.score[team] < S.score[S.otOpeningFGTeam]) {
-          endOT(S.otOpeningFGTeam, "opponent failed to answer the field goal");
-          return true;
-        }
-        return false;
+        S.ball = Math.max(1, Math.min(99, S.ball));
       }
-'''
-if helpers not in s:
-    s = s.replace(needle, helpers + needle)
-
-# Turnover on downs ends an OT possession.
-s = s.replace('S.log.push("<b>TURNOVER ON DOWNS</b> at " + spotText());\n          switchPos();', 'S.log.push("<b>TURNOVER ON DOWNS</b> at " + spotText());\n          if (S.ot && otPossessionEnded(o, null)) return;\n          switchPos();')
-
-# Forced turnover ends an OT possession.
-s = s.replace('S.log.push(\n          "<b>TURNOVER:</b> defensive bag knocked an offensive bag off the board and went in the hole at " +\n            spotText(),\n        );\n        switchPos();', 'S.log.push(\n          "<b>TURNOVER:</b> defensive bag knocked an offensive bag off the board and went in the hole at " +\n            spotText(),\n        );\n        let oldOffense = S.pos;\n        if (S.ot && otPossessionEnded(oldOffense, null)) return;\n        switchPos();')
-
-# Touchdown immediately ends OT, without conversion/kickoff.
-s = s.replace('S.log.push("<b>TOUCHDOWN " + S.names[t] + "!</b> +6");\n        stop();\n        render();\n        conversion();', 'S.log.push("<b>TOUCHDOWN " + S.names[t] + "!</b> +6");\n        stop();\n        if (S.ot) {\n          otPossessionEnded(t, "TD");\n          return;\n        }\n        render();\n        conversion();')
-
-# Safety immediately ends OT for the defensive/scoring team.
-s = s.replace('S.score[defense] += 2;\n        S.log.push(', 'S.score[defense] += 2;\n        if (S.ot) {\n          S.log.push("<b>SAFETY!</b> " + S.names[defense] + " +2.");\n          otPossessionEnded(defense, "SAFETY");\n          return;\n        }\n        S.log.push(')
-
-# Punt ends the punting team possession in OT but play continues through punt return.
-s = s.replace('let p = S.pos,\n          receiver = 1 - p,', 'let p = S.pos,\n          receiver = 1 - p,')
-s = s.replace('S.pos = receiver;\n        S.down = 1;', 'if (S.ot) otPossessionEnded(p, null);\n        if (S.otGameOver) return;\n        S.pos = receiver;\n        S.down = 1;', 1)
-
-# Field goals use OT response/sudden-death logic. Miss ends possession.
-s = s.replace('S.log.push("<b>FIELD GOAL GOOD!</b> +3");\n          S.pos = 1 - t;', 'S.log.push("<b>FIELD GOAL GOOD!</b> +3");\n          if (S.ot) {\n            if (otPossessionEnded(t, "FG")) return;\n          }\n          S.pos = 1 - t;')
-s = s.replace('S.log.push("<b>FIELD GOAL NO GOOD.</b> Turnover at " + spotText());\n          switchPos();', 'S.log.push("<b>FIELD GOAL NO GOOD.</b> Turnover at " + spotText());\n          if (S.ot && otPossessionEnded(t, null)) return;\n          switchPos();')
-
-# OT kickoffs do not start a clock.
-s = s.replace('if (S.sec > 0) startClock();', 'if (!S.ot && S.sec > 0) startClock();')
-
-# Replace end-of-regulation OT entry with Rock/Paper/Scissors setup and no clock.
-old = '''        } else if (S.score[0] == S.score[1]) {
-          S.ot = true;
-          S.to = [3, 3];
-          S.sec = 1200;
-          S.clockHoldRound = false;
-          S.quarterRoundFinished = false;
-          S.log.push("<b>OVERTIME</b>");
-          render();
-        } else alert("Game over.");'''
-new = '''        } else if (S.score[0] == S.score[1]) {
-          S.ot = true;
-          S.to = [3, 3];
-          S.sec = 0;
-          S.run = false;
-          S.clockHoldRound = false;
-          S.quarterRoundFinished = false;
-          S.otFirst = null;
-          S.otPossessions = [0, 0];
-          S.otSuddenDeath = false;
-          S.otOpeningFGTeam = null;
-          S.otGameOver = false;
-          S.log.push("<b>OVERTIME</b> — no time limit. Rock, Paper, Scissors determines who chooses to kick or receive.");
-          render();
-          overtimeSetup();
-        } else alert("Game over.");'''
-if old not in s:
-    raise SystemExit('Could not find current overtime entry block')
-s = s.replace(old, new)
-
-# Add OT setup chooser before undo().
-needle2 = '      function undo() {'
-ot_setup = '''      function overtimeSetup() {
-        picktitle.textContent = "Overtime — Rock, Paper, Scissors";
-        picktext.textContent = "Select the team that won Rock, Paper, Scissors.";
+      function penalty() {
+        if (S.kick) {
+          alert("Complete the kickoff or return first.");
+          return;
+        }
+        picktitle.textContent = "Penalty";
+        picktext.textContent = "Select the penalty.";
         choices.innerHTML =
-          '<button class="btn" onclick="overtimeWinner(0)">' + S.names[0] + '</button><button class="btn" onclick="overtimeWinner(1)">' + S.names[1] + '</button>';
+          '<button class="btn" onclick="penaltyTeam(\'foul\')">Foul-Line Violation — 5 yd</button>' +
+          '<button class="btn" onclick="penaltyTeam(\'turn\')">Throwing Out of Turn — 5 yd</button>' +
+          '<button class="btn" onclick="penaltyTeam(\'bags\')">Touching / Moving Live Bags — 10 yd</button>' +
+          '<button class="btn red" onclick="penaltyTeam(\'interference\')">Interference — 15 yd + Automatic 4-Bagger</button>' +
+          '<button class="btn" onclick="penaltyTeam(\'delay\')">Delay of Game — 5 yd</button>';
         pick.classList.add("show");
       }
-      function overtimeWinner(winner) {
-        picktitle.textContent = S.names[winner] + " won";
-        picktext.textContent = "Choose to receive or kick.";
+      function penaltyTeam(type) {
+        mode = "penalty:" + type;
+        picktitle.textContent = "Penalty — Offending Team";
+        picktext.textContent = "Which team committed the penalty?";
         choices.innerHTML =
-          '<button class="btn primary" onclick="startOvertime(' + winner + ')">RECEIVE</button><button class="btn" onclick="startOvertime(' + (1 - winner) + ')">KICK</button>';
+          '<button class="btn" onclick="penaltyResolve(0)">' + S.names[0] + '</button>' +
+          '<button class="btn" onclick="penaltyResolve(1)">' + S.names[1] + '</button>';
       }
-      function startOvertime(receiver) {
-        S.otFirst = receiver;
-        S.pos = receiver;
-        S.kick = true;
-        S.ball = receiver === 0 ? 40 : 60;
-        S.down = 1;
-        S.gain = Math.max(0, Math.min(100, S.ball + dir() * 10));
-        S.drive = S.ball;
-        S.log.push("<b>OVERTIME START:</b> " + S.names[receiver] + " receives the kickoff.");
+      function penaltyResolve(team) {
+        let type = mode.split(":")[1];
+        let info = {
+          foul: [5, "FOUL-LINE VIOLATION"],
+          turn: [5, "THROWING OUT OF TURN"],
+          bags: [10, "TOUCHING / MOVING LIVE BAGS"],
+          interference: [15, "INTERFERENCE"],
+          delay: [5, "DELAY OF GAME"],
+        }[type];
+        snap();
+        let yards = info[0], label = info[1];
+        if (type === "foul" || type === "turn") {
+          S.log.push("<b>PENALTY — " + label + ":</b> " + S.names[team] + " — " + yards + " yards. The illegal bag does not count and is removed. Any affected bags belonging to the offending team that fall in do not count and are removed; any opponent bag knocked into the hole counts normally.");
+        } else if (type === "bags") {
+          S.log.push("<b>PENALTY — " + label + ":</b> " + S.names[team] + " — 10 yards. Any moved/affected bags belonging to the offending team do not count and are removed. Any moved/affected opponent bags count as bags in the hole. Play resumes normally.");
+        } else if (type === "delay") {
+          S.log.push("<b>PENALTY — DELAY OF GAME:</b> " + S.names[team] + " — 5 yards. Play resumes normally.");
+        }
+        if (type === "interference") {
+          closeM("pick");
+          penaltyInterference(team);
+          return;
+        }
+        enforcePenaltyYards(team, yards);
         closeM("pick");
         render();
-        airmail("kickoff");
+      }
+      function penaltyInterference(team) {
+        let opponent = 1 - team;
+        picktitle.textContent = "Interference — Offending Team's Completed Bags";
+        picktext.textContent = "Enter only the offending team's bags already thrown before the interference. Those completed bags still count normally. Unthrown bags count as 0. The opponent receives an automatic 4-bagger and the round ends.";
+        choices.innerHTML =
+          '<div style="width:100%"><label>Offending bags in hole</label><input class="name" id="penHole" type="number" min="0" max="4" value="0"><label>Offending bags on board</label><input class="name" id="penBoard" type="number" min="0" max="4" value="0"><button class="btn red full" onclick="resolveInterference(' + team + ')">ENFORCE INTERFERENCE</button></div>';
+        pick.classList.add("show");
+      }
+      function resolveInterference(team) {
+        let holes = Math.max(0, Math.min(4, Number(document.getElementById("penHole").value) || 0));
+        let boards = Math.max(0, Math.min(4 - holes, Number(document.getElementById("penBoard").value) || 0));
+        let offense = S.pos;
+        let teamYards = holes * (team === offense ? 4 : 3) + boards;
+        let opponent = 1 - team;
+        let opponentYards = opponent === offense ? 16 : 12;
+        let net = offense === team ? teamYards - opponentYards : opponentYards - teamYards;
+        S.log.push("<b>PENALTY — INTERFERENCE:</b> " + S.names[team] + " — 15 yards + automatic 4-bagger for " + S.names[opponent] + ". Offending team's completed bags count normally; unthrown bags count as 0. Round ends. Net round yardage: " + (net >= 0 ? "+" : "") + net + ".");
+        let os = S.stats[offense], ds = S.stats[1 - offense];
+        os.offRounds++;
+        ds.defRounds++;
+        if (team === offense) {
+          os.offHoles += holes;
+          os.offBoards += boards;
+          ds.defHoles += 4;
+        } else {
+          ds.defHoles += holes;
+          ds.defBoards += boards;
+          os.offHoles += 4;
+        }
+        os.netYards += net;
+        os.biggestGain = os.biggestGain === null ? net : Math.max(os.biggestGain, net);
+        apply(net);
+        if (!S.otGameOver) enforcePenaltyYards(team, 15);
+        resetBags();
+        closeM("pick");
+        render();
       }
 '''
-if ot_setup not in s:
-    s = s.replace(needle2, ot_setup + needle2)
+if penalty_code not in s:
+    s = s.replace(needle, penalty_code + needle)
 
-# Clock cannot run in OT.
-s = s.replace('function startClock() {\n        if (S.sec <= 0) return;', 'function startClock() {\n        if (S.ot || S.sec <= 0) return;')
+# Export rule summary.
+s = s.replace('safety:\n              "If offensive yardage crosses into its own end zone, defense scores 2 and the team that allowed the safety kicks off to the scoring team.",', 'safety:\n              "If offensive yardage crosses into its own end zone, defense scores 2 and the team that allowed the safety kicks off to the scoring team.",\n            penalties:\n              "Foul-line violation 5 yards; throwing out of turn 5 yards; touching/moving live bags 10 yards; interference 15 yards plus automatic 4-bagger; delay of game 5 yards.",')
 
 p.write_text(s)
 
-# Replace the written overtime section.
+# Add penalty section to rules before overtime and renumber overtime.
 rp = Path('rules.html')
 r = rp.read_text()
-start = r.index('      <div class="card">\n        <h2>11. Overtime</h2>')
-end = r.index('      <div class="card">\n        <h2>Quick Reference</h2>', start)
-new_rules = '''      <div class="card">
-        <h2>11. Overtime</h2>
-        <div class="rule"><b>When overtime begins:</b> If all four quarters are complete and the score is tied, the game goes to overtime.</div>
-        <div class="rule"><b>No time limit:</b> Overtime has no game clock. Play continues until the overtime rules produce a winner.</div>
-        <div class="rule"><b>Starting overtime:</b> The teams play Rock, Paper, Scissors. The winner chooses whether to kick or receive. The normal kickoff and kick-return rules are used, and the receiving team begins the first offensive possession from the resulting field position.</div>
-        <div class="rule"><b>Touchdown:</b> If the team with the opening possession scores a touchdown, the game ends immediately. A touchdown at any later point in overtime also ends the game immediately.</div>
-        <div class="rule"><b>Opening-possession field goal:</b> If the first team scores a field goal, the opponent receives one possession. A touchdown on that possession wins the game. A field goal ties the overtime score and sends the game to sudden death. If the opponent fails to score, the team that made the original field goal wins.</div>
-        <div class="rule"><b>Both teams fail to score:</b> If each team has completed an offensive possession without scoring and the game is still tied, overtime becomes sudden death.</div>
-        <div class="rule"><b>Sudden death:</b> Once sudden death begins, the next score wins — touchdown, field goal, or safety.</div>
-        <div class="rule"><b>Safety:</b> A safety at any point in overtime ends the game immediately. The team scoring the safety wins.</div>
-        <div class="rule">Each team receives <b>3 timeouts in overtime</b>.</div>
+r = r.replace('<h2>11. Overtime</h2>', '<h2>12. Overtime</h2>')
+marker = '      <div class="card">\n        <h2>12. Overtime</h2>'
+pen_rules = '''      <div class="card">
+        <h2>11. Penalties</h2>
+        <div class="rule"><b>Foul-Line Violation — 5 yards:</b> A player must remain behind the foul line until the thrown bag has completely finished moving — stopped on the board, gone into the hole, or finished off the board. If the player crosses early, the thrown bag is dead, does not count, and is removed from play. Any of the offending team's bags knocked into the hole by the illegal bag also do not count and are removed. Any opponent bag knocked into the hole counts normally.</div>
+        <div class="rule"><b>Throwing Out of Turn — 5 yards:</b> The illegal bag is dead, does not count, and is removed. Any of the offending team's bags knocked into the hole by that illegal throw do not count and are removed. Any opponent bag knocked into the hole counts normally.</div>
+        <div class="rule"><b>Touching or Moving Live Bags — 10 yards:</b> If a player touches or moves bags before the round is complete, any moved or affected bags belonging to the offending player/team do not count and are removed from play. Any moved or affected opponent bags are counted as bags in the hole. After the penalty is enforced, play resumes normally.</div>
+        <div class="rule"><b>Interference with an Opponent's Throw — 15 yards + automatic 4-bagger:</b> The opponent receives an automatic 4-bagger and the round ends immediately. Bags already thrown by the offending team count normally whether they are in the hole or on the board. Any bags the offending team had not yet thrown count as 0. Calculate the round result, enforce the additional 15-yard penalty, and resume play normally.</div>
+        <div class="rule"><b>Delay of Game — 5 yards:</b> Intentionally delaying or unnecessarily stalling play results in a 5-yard penalty. After enforcement, play resumes normally.</div>
+        <div class="rule"><b>Special-teams throw requirements:</b> When a play requires an airmail, a throw that does not meet that requirement simply does not count. It is not an additional penalty.</div>
       </div>
 '''
-r = r[:start] + new_rules + r[end:]
+if marker not in r:
+    raise SystemExit('Could not find overtime section marker')
+r = r.replace(marker, pen_rules + marker)
 rp.write_text(r)
