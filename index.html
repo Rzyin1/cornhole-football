@@ -528,6 +528,8 @@
         hist: [],
         kick: true,
         lastTD: null,
+        openingReceiver: null,
+        quarterRoundFinished: false,
         stats: blankStats(),
       });
       let S =
@@ -540,6 +542,7 @@
         kickReturnCount = 0,
         puntHoles = 0;
       if (S.clockHoldRound == null) S.clockHoldRound = false;
+      if (S.quarterRoundFinished == null) S.quarterRoundFinished = false;
       if (!Array.isArray(S.to)) S.to = S.ot ? [3, 3] : [4, 4];
       if (!S.stats) S.stats = blankStats();
       S.stats.forEach((s) => {
@@ -720,6 +723,12 @@
         } else S.down++;
       }
       function submitRound() {
+        if (S.sec <= 0 && S.quarterRoundFinished) {
+          alert(
+            "The quarter is over. Advance to the next quarter before starting another round.",
+          );
+          return;
+        }
         if (S.kick) {
           alert("Complete the kickoff and return first.");
           return;
@@ -761,6 +770,7 @@
         );
         apply(y);
         resetBags();
+        if (S.sec <= 0) S.quarterRoundFinished = true;
         if (S.clockHoldRound && !S.kick && S.sec > 0) {
           S.clockHoldRound = false;
           startClock();
@@ -1293,16 +1303,33 @@
           S.q++;
           S.sec = 1200;
           S.clockHoldRound = false;
+          S.quarterRoundFinished = false;
           if (S.q == 3) {
             S.to = [4, 4];
-            S.log.push("<b>HALFTIME</b>");
+            S.log.push(
+              "<b>HALFTIME</b> — timeouts reset. Second-half kickoff.",
+            );
+            let openingReceiver =
+              S.openingReceiver == null ? S.pos : S.openingReceiver;
+            S.pos = 1 - openingReceiver;
+            S.kick = true;
+            render();
+            airmail("kickoff");
+            return;
           }
+          S.log.push(
+            "<b>START OF Q" +
+              S.q +
+              "</b> — possession, field position, down and distance carry over.",
+          );
           render();
+          startClock();
         } else if (S.score[0] == S.score[1]) {
           S.ot = true;
           S.to = [3, 3];
           S.sec = 1200;
           S.clockHoldRound = false;
+          S.quarterRoundFinished = false;
           S.log.push("<b>OVERTIME</b>");
           render();
         } else alert("Game over.");
@@ -1314,6 +1341,7 @@
         S = p;
         S.hist = h;
         if (S.clockHoldRound == null) S.clockHoldRound = false;
+        if (S.quarterRoundFinished == null) S.quarterRoundFinished = false;
         if (!Array.isArray(S.to)) S.to = S.ot ? [3, 3] : [4, 4];
         if (!S.stats) S.stats = blankStats();
         S.stats.forEach((s) => {
@@ -1338,6 +1366,8 @@
           p1.value.trim() || "Player 2",
         ];
         S.pos = r;
+        S.openingReceiver = r;
+        S.quarterRoundFinished = false;
         S.log.push(
           "<b>ROCK, PAPER, SCISSORS:</b> " +
             S.names[r] +
