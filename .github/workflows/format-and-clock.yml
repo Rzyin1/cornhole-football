@@ -1,4 +1,4 @@
-name: Final play rules migration
+name: Overtime rules migration
 
 on:
   push:
@@ -16,16 +16,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Apply final play rule
+      - name: Apply overtime rules
         run: python3 .github/scripts/update_quarters.py
       - name: Format files
-        run: npx --yes prettier@3.3.3 --write rules.html
+        run: npx --yes prettier@3.3.3 --write index.html rules.html
       - name: Commit changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add rules.html
+          git add index.html rules.html
           if ! git diff --cached --quiet; then
-            git commit -m "Document full end-of-quarter play sequence"
+            git commit -m "Implement complete overtime rules"
             git push
           fi
