@@ -1,4 +1,4 @@
-name: Tracker syntax fix
+name: Penalty enforcement update
 
 on:
   push:
@@ -16,16 +16,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Fix tracker JavaScript
+      - name: Apply penalty enforcement rules
         run: python3 .github/scripts/update_quarters.py
-      - name: Format tracker
-        run: npx --yes prettier@3.3.3 --write index.html
+      - name: Format tracker and rules
+        run: npx --yes prettier@3.3.3 --write index.html rules.html
       - name: Commit changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add index.html
+          git add index.html rules.html
           if ! git diff --cached --quiet; then
-            git commit -m "Fix tracker startup after penalty update"
+            git commit -m "Enforce penalty goal-line and current-play rules"
             git push
           fi
