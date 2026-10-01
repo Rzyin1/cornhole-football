@@ -1,4 +1,4 @@
-name: Format tracker and update clock
+name: Update quarter transitions and halftime kickoff
 
 on:
   push:
@@ -15,68 +15,89 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: Update tracker rules
+      - name: Update tracker and rules
         run: |
           python3 <<'PY'
           from pathlib import Path
-          p=Path('index.html')
-          s=p.read_text()
 
-          # Display/default game state: 20-minute quarters, 4 TO per half.
-          s=s.replace('id="clock">15:00</div>', 'id="clock">20:00</div>')
-          s=s.replace("q:1,sec:900,run:false,to:[3,3],ot:false", "q:1,sec:1200,run:false,to:[4,4],ot:false,clockHoldRound:false")
+          p = Path('index.html')
+          s = p.read_text()
 
-          # Existing saved games get the new timeout/clock-hold field safely.
-          marker="if(!S.stats)S.stats=blankStats();"
-          compat="if(S.clockHoldRound==null)S.clockHoldRound=false;if(!Array.isArray(S.to))S.to=S.ot?[3,3]:[4,4];"
-          if compat not in s:
-              s=s.replace(marker, compat+marker)
+          # Track who received the opening kickoff and whether the final round at 0:00 has been scored.
+          s = s.replace('lastTD: null,\n        stats: blankStats(),', 'lastTD: null,\n        openingReceiver: null,\n        quarterRoundFinished: false,\n        stats: blankStats(),')
+          s = s.replace('if (S.clockHoldRound == null) S.clockHoldRound = false;', 'if (S.clockHoldRound == null) S.clockHoldRound = false;\n      if (S.quarterRoundFinished == null) S.quarterRoundFinished = false;')
 
-          # Timeout dots: 4 regulation, 3 OT.
-          s=s.replace("(S.ot?2:3)-S.to[0]", "(S.ot?3:4)-S.to[0]")
-          s=s.replace("(S.ot?2:3)-S.to[1]", "(S.ot?3:4)-S.to[1]")
+          # At 0:00, allow the round already in progress to be scored once, then block another round.
+          s = s.replace('function submitRound() {\n        if (S.kick) {', 'function submitRound() {\n        if (S.sec <= 0 && S.quarterRoundFinished) {\n          alert("The quarter is over. Advance to the next quarter before starting another round.");\n          return;\n        }\n        if (S.kick) {')
+          s = s.replace('apply(y);\n        resetBags();', 'apply(y);\n        resetBags();\n        if (S.sec <= 0) S.quarterRoundFinished = true;')
 
-          # A normal submitted down must NOT stop the continuous clock.
-          s=s.replace("function submitRound(){if(S.kick){alert('Complete the kickoff and return first.');return}snap();stop();", "function submitRound(){if(S.kick){alert('Complete the kickoff and return first.');return}snap();")
-          # If a timeout protected this round, resume automatically after it is scored.
-          s=s.replace("apply(y);resetBags();render()}", "apply(y);resetBags();if(S.clockHoldRound&&!S.kick&&S.sec>0){S.clockHoldRound=false;startClock()}render()}")
+          # Save the opening receiver when a new game begins.
+          s = s.replace('S.pos = r;\n        S.log.push(', 'S.pos = r;\n        S.openingReceiver = r;\n        S.quarterRoundFinished = false;\n        S.log.push(')
 
-          # Kickoffs always stop the clock, regardless of why the kickoff occurs.
-          s=s.replace("function airmail(m){mode=m;", "function airmail(m){if(m==='kickoff')stop();mode=m;")
+          # Replace quarter transition logic.
+          start = s.index('      function nextQuarter() {')
+          end = s.index('      function undo() {', start)
+          if start == -1 or end == -1:
+              raise SystemExit('Could not find nextQuarter function')
+          new_func = '''      function nextQuarter() {
+        snap();
+        stop();
+        if (S.q < 4) {
+          S.q++;
+          S.sec = 1200;
+          S.clockHoldRound = false;
+          S.quarterRoundFinished = false;
+          if (S.q == 3) {
+            S.to = [4, 4];
+            S.log.push("<b>HALFTIME</b> — timeouts reset. Second-half kickoff.");
+            let openingReceiver = S.openingReceiver == null ? S.pos : S.openingReceiver;
+            S.pos = 1 - openingReceiver;
+            S.kick = true;
+            render();
+            airmail("kickoff");
+            return;
+          }
+          S.log.push("<b>START OF Q" + S.q + "</b> — possession, field position, down and distance carry over.");
+          render();
+          startClock();
+        } else if (S.score[0] == S.score[1]) {
+          S.ot = true;
+          S.to = [3, 3];
+          S.sec = 1200;
+          S.clockHoldRound = false;
+          S.quarterRoundFinished = false;
+          S.log.push("<b>OVERTIME</b>");
+          render();
+        } else alert("Game over.");
+      }
+'''
+          s = s[:start] + new_func + s[end:]
 
-          # End of kickoff return starts the continuous clock for the new possession.
-          s=s.replace("S.log.push('<b>RETURN ENDS:</b> '+kickReturnCount+' made before miss = '+(kickReturnCount*10)+' return yards. Ball at '+spotText());closeM('pick');render()}", "S.log.push('<b>RETURN ENDS:</b> '+kickReturnCount+' made before miss = '+(kickReturnCount*10)+' return yards. Ball at '+spotText());closeM('pick');if(S.sec>0)startClock();render()}")
-
-          # Timeout stops now and protects the entire following normal round.
-          s=s.replace("S.to[t]--;S.log.push('<b>TIMEOUT</b>", "S.to[t]--;S.clockHoldRound=true;S.log.push('<b>TIMEOUT</b>")
-
-          # Add a reusable start function; manual button still works.
-          old="function clockToggle(){S.run=!S.run;if(S.run){clearInterval(timer);timer=setInterval(()=>{if(S.sec>0){S.sec--;render()}else stop()},1000)}else stop();render()}"
-          new="function startClock(){if(S.sec<=0)return;S.run=true;clearInterval(timer);timer=setInterval(()=>{if(S.sec>0){S.sec--;render()}else{stop();render()}},1000)}function clockToggle(){if(S.run)stop();else startClock();render()}"
-          s=s.replace(old,new)
-
-          # Quarter/halftime/overtime clock and timeout resets.
-          s=s.replace("S.q++;S.sec=900;if(S.q==3){S.to=[3,3];", "S.q++;S.sec=1200;S.clockHoldRound=false;if(S.q==3){S.to=[4,4];")
-          s=s.replace("S.ot=true;S.to=[2,2];S.sec=900;", "S.ot=true;S.to=[3,3];S.sec=1200;S.clockHoldRound=false;")
-
-          # Imported old exports should use current clock behavior safely.
-          s=s.replace("S.run=false;S.hist=Array.isArray(S.hist)?S.hist:[];", "S.run=false;S.clockHoldRound=false;S.hist=Array.isArray(S.hist)?S.hist:[];")
+          # Import/undo compatibility.
+          s = s.replace('S.clockHoldRound = false;\n              S.hist', 'S.clockHoldRound = false;\n              S.quarterRoundFinished = false;\n              S.hist')
 
           p.write_text(s)
+
+          # Rules page: expand the clock/quarter section.
+          rp = Path('rules.html')
+          r = rp.read_text()
+          old = '<div class="rule"><b>Quarter breaks:</b> When a quarter ends, play advances to the next quarter. Halftime occurs after the 2nd quarter.</div>'
+          new = '''<div class="rule"><b>End of a quarter:</b> If the clock reaches 0:00 while a round is already being played, that round is finished normally. All 4 offensive bags and all 4 defensive bags are thrown, and the result of the down still counts. No new round may begin after the final round is scored.</div><div class="rule"><b>Q1 to Q2:</b> The game continues from the exact same situation. Possession, field position, down, and distance all carry over. The clock resets to 20:00 and there is no kickoff.</div><div class="rule"><b>Halftime:</b> After Q2, the first-half possession ends. Both teams reset to 4 timeouts. The team that received the opening kickoff kicks off to begin the second half, so the team that kicked to start the game receives the Q3 kickoff. The clock stays stopped during the kickoff and return and begins running when the return ends and the new offensive possession starts.</div><div class="rule"><b>Q3 to Q4:</b> Just like Q1 to Q2, possession, field position, down, and distance carry over unchanged. The clock resets to 20:00 and there is no kickoff.</div>'''
+          if old not in r:
+              raise SystemExit('Could not find quarter-break rule')
+          r = r.replace(old, new)
+          rp.write_text(r)
           PY
 
-      - name: Format index.html
-        run: npx --yes prettier@3.3.3 --write index.html
+      - name: Format files
+        run: npx --yes prettier@3.3.3 --write index.html rules.html
 
-      - name: Commit tracker update
+      - name: Commit updates
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add index.html
+          git add index.html rules.html
           if ! git diff --cached --quiet; then
-            git commit -m "Format tracker and implement continuous 20-minute clock"
+            git commit -m "Implement football-style quarter transitions"
             git push
           fi
