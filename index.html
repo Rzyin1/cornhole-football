@@ -270,6 +270,16 @@
       }
       .modal .card {
         width: min(500px, 100%);
+        max-height: calc(100vh - 30px);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+      }
+      #setup {
+        align-items: flex-start;
+        overflow-y: auto;
+      }
+      #setup > .card {
+        margin: auto;
       }
       input.name {
         width: 100%;
