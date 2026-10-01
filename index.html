@@ -431,6 +431,7 @@
             ><button class="btn gold" onclick="conversion()">
               TD / Conversion</button
             ><button class="btn red" onclick="turnover()">Turnover</button
+            ><button class="btn gold" onclick="penalty()">Penalty</button
             ><button class="btn" onclick="timeout()">Timeout</button
             ><button class="btn" onclick="undo()">Undo</button
             ><button class="btn" onclick="nextQuarter()">Next Quarter</button>
@@ -1175,6 +1176,108 @@
         render();
         airmail("kickoff");
       }
+      function enforcePenaltyYards(team, yards) {
+        let offense = S.pos;
+        let movement = team === offense ? -yards : yards;
+        S.ball += dir() * movement;
+        if (S.ball >= 100 || S.ball <= 0) {
+          if ((offense === 0 && S.ball >= 100) || (offense === 1 && S.ball <= 0)) {
+            S.ball = offense === 0 ? 100 : 0;
+            td();
+          } else {
+            safety();
+          }
+          return;
+        }
+        S.ball = Math.max(1, Math.min(99, S.ball));
+      }
+      function penalty() {
+        if (S.kick) {
+          alert("Complete the kickoff or return first.");
+          return;
+        }
+        picktitle.textContent = "Penalty";
+        picktext.textContent = "Select the penalty.";
+        choices.innerHTML =
+          '<button class="btn" onclick="penaltyTeam('foul')">Foul-Line Violation — 5 yd</button>' +
+          '<button class="btn" onclick="penaltyTeam('turn')">Throwing Out of Turn — 5 yd</button>' +
+          '<button class="btn" onclick="penaltyTeam('bags')">Touching / Moving Live Bags — 10 yd</button>' +
+          '<button class="btn red" onclick="penaltyTeam('interference')">Interference — 15 yd + Automatic 4-Bagger</button>' +
+          '<button class="btn" onclick="penaltyTeam('delay')">Delay of Game — 5 yd</button>';
+        pick.classList.add("show");
+      }
+      function penaltyTeam(type) {
+        mode = "penalty:" + type;
+        picktitle.textContent = "Penalty — Offending Team";
+        picktext.textContent = "Which team committed the penalty?";
+        choices.innerHTML =
+          '<button class="btn" onclick="penaltyResolve(0)">' + S.names[0] + '</button>' +
+          '<button class="btn" onclick="penaltyResolve(1)">' + S.names[1] + '</button>';
+      }
+      function penaltyResolve(team) {
+        let type = mode.split(":")[1];
+        let info = {
+          foul: [5, "FOUL-LINE VIOLATION"],
+          turn: [5, "THROWING OUT OF TURN"],
+          bags: [10, "TOUCHING / MOVING LIVE BAGS"],
+          interference: [15, "INTERFERENCE"],
+          delay: [5, "DELAY OF GAME"],
+        }[type];
+        snap();
+        let yards = info[0], label = info[1];
+        if (type === "foul" || type === "turn") {
+          S.log.push("<b>PENALTY — " + label + ":</b> " + S.names[team] + " — " + yards + " yards. The illegal bag does not count and is removed. Any affected bags belonging to the offending team that fall in do not count and are removed; any opponent bag knocked into the hole counts normally.");
+        } else if (type === "bags") {
+          S.log.push("<b>PENALTY — " + label + ":</b> " + S.names[team] + " — 10 yards. Any moved/affected bags belonging to the offending team do not count and are removed. Any moved/affected opponent bags count as bags in the hole. Play resumes normally.");
+        } else if (type === "delay") {
+          S.log.push("<b>PENALTY — DELAY OF GAME:</b> " + S.names[team] + " — 5 yards. Play resumes normally.");
+        }
+        if (type === "interference") {
+          closeM("pick");
+          penaltyInterference(team);
+          return;
+        }
+        enforcePenaltyYards(team, yards);
+        closeM("pick");
+        render();
+      }
+      function penaltyInterference(team) {
+        let opponent = 1 - team;
+        picktitle.textContent = "Interference — Offending Team's Completed Bags";
+        picktext.textContent = "Enter only the offending team's bags already thrown before the interference. Those completed bags still count normally. Unthrown bags count as 0. The opponent receives an automatic 4-bagger and the round ends.";
+        choices.innerHTML =
+          '<div style="width:100%"><label>Offending bags in hole</label><input class="name" id="penHole" type="number" min="0" max="4" value="0"><label>Offending bags on board</label><input class="name" id="penBoard" type="number" min="0" max="4" value="0"><button class="btn red full" onclick="resolveInterference(' + team + ')">ENFORCE INTERFERENCE</button></div>';
+        pick.classList.add("show");
+      }
+      function resolveInterference(team) {
+        let holes = Math.max(0, Math.min(4, Number(document.getElementById("penHole").value) || 0));
+        let boards = Math.max(0, Math.min(4 - holes, Number(document.getElementById("penBoard").value) || 0));
+        let offense = S.pos;
+        let teamYards = holes * (team === offense ? 4 : 3) + boards;
+        let opponent = 1 - team;
+        let opponentYards = opponent === offense ? 16 : 12;
+        let net = offense === team ? teamYards - opponentYards : opponentYards - teamYards;
+        S.log.push("<b>PENALTY — INTERFERENCE:</b> " + S.names[team] + " — 15 yards + automatic 4-bagger for " + S.names[opponent] + ". Offending team's completed bags count normally; unthrown bags count as 0. Round ends. Net round yardage: " + (net >= 0 ? "+" : "") + net + ".");
+        let os = S.stats[offense], ds = S.stats[1 - offense];
+        os.offRounds++;
+        ds.defRounds++;
+        if (team === offense) {
+          os.offHoles += holes;
+          os.offBoards += boards;
+          ds.defHoles += 4;
+        } else {
+          ds.defHoles += holes;
+          ds.defBoards += boards;
+          os.offHoles += 4;
+        }
+        os.netYards += net;
+        os.biggestGain = os.biggestGain === null ? net : Math.max(os.biggestGain, net);
+        apply(net);
+        if (!S.otGameOver) enforcePenaltyYards(team, 15);
+        resetBags();
+        closeM("pick");
+        render();
+      }
       function timeout() {
         picktitle.textContent = "Who called timeout?";
         picktext.textContent = "Choose the player/team.";
@@ -1269,6 +1372,8 @@
             punt: "Punting team throws 4 bags. Hole = 10 yards, board = 5 yards, miss = 0. Punt cannot cross the goal line; deepest spot is receiving team own 1. Punt return uses consecutive airmails at 10 yards each until first miss.",
             safety:
               "If offensive yardage crosses into its own end zone, defense scores 2 and the team that allowed the safety kicks off to the scoring team.",
+            penalties:
+              "Foul-line violation 5 yards; throwing out of turn 5 yards; touching/moving live bags 10 yards; interference 15 yards plus automatic 4-bagger; delay of game 5 yards.",
           },
           exportedAt: new Date().toISOString(),
           players: [playerStats(0), playerStats(1)],
