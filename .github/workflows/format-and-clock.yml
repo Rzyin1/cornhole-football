@@ -1,8 +1,9 @@
-name: Update quarter transitions and halftime kickoff
+name: Quarter transition migration
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
       - '.github/workflows/format-and-clock.yml'
   workflow_dispatch:
@@ -15,84 +16,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Update tracker and rules
-        run: |
-          python3 <<'PY'
-          from pathlib import Path
-
-          p = Path('index.html')
-          s = p.read_text()
-
-          # Track who received the opening kickoff and whether the final round at 0:00 has been scored.
-          s = s.replace('lastTD: null,\n        stats: blankStats(),', 'lastTD: null,\n        openingReceiver: null,\n        quarterRoundFinished: false,\n        stats: blankStats(),')
-          s = s.replace('if (S.clockHoldRound == null) S.clockHoldRound = false;', 'if (S.clockHoldRound == null) S.clockHoldRound = false;\n      if (S.quarterRoundFinished == null) S.quarterRoundFinished = false;')
-
-          # At 0:00, allow the round already in progress to be scored once, then block another round.
-          s = s.replace('function submitRound() {\n        if (S.kick) {', 'function submitRound() {\n        if (S.sec <= 0 && S.quarterRoundFinished) {\n          alert("The quarter is over. Advance to the next quarter before starting another round.");\n          return;\n        }\n        if (S.kick) {')
-          s = s.replace('apply(y);\n        resetBags();', 'apply(y);\n        resetBags();\n        if (S.sec <= 0) S.quarterRoundFinished = true;')
-
-          # Save the opening receiver when a new game begins.
-          s = s.replace('S.pos = r;\n        S.log.push(', 'S.pos = r;\n        S.openingReceiver = r;\n        S.quarterRoundFinished = false;\n        S.log.push(')
-
-          # Replace quarter transition logic.
-          start = s.index('      function nextQuarter() {')
-          end = s.index('      function undo() {', start)
-          if start == -1 or end == -1:
-              raise SystemExit('Could not find nextQuarter function')
-          new_func = '''      function nextQuarter() {
-        snap();
-        stop();
-        if (S.q < 4) {
-          S.q++;
-          S.sec = 1200;
-          S.clockHoldRound = false;
-          S.quarterRoundFinished = false;
-          if (S.q == 3) {
-            S.to = [4, 4];
-            S.log.push("<b>HALFTIME</b> — timeouts reset. Second-half kickoff.");
-            let openingReceiver = S.openingReceiver == null ? S.pos : S.openingReceiver;
-            S.pos = 1 - openingReceiver;
-            S.kick = true;
-            render();
-            airmail("kickoff");
-            return;
-          }
-          S.log.push("<b>START OF Q" + S.q + "</b> — possession, field position, down and distance carry over.");
-          render();
-          startClock();
-        } else if (S.score[0] == S.score[1]) {
-          S.ot = true;
-          S.to = [3, 3];
-          S.sec = 1200;
-          S.clockHoldRound = false;
-          S.quarterRoundFinished = false;
-          S.log.push("<b>OVERTIME</b>");
-          render();
-        } else alert("Game over.");
-      }
-'''
-          s = s[:start] + new_func + s[end:]
-
-          # Import/undo compatibility.
-          s = s.replace('S.clockHoldRound = false;\n              S.hist', 'S.clockHoldRound = false;\n              S.quarterRoundFinished = false;\n              S.hist')
-
-          p.write_text(s)
-
-          # Rules page: expand the clock/quarter section.
-          rp = Path('rules.html')
-          r = rp.read_text()
-          old = '<div class="rule"><b>Quarter breaks:</b> When a quarter ends, play advances to the next quarter. Halftime occurs after the 2nd quarter.</div>'
-          new = '''<div class="rule"><b>End of a quarter:</b> If the clock reaches 0:00 while a round is already being played, that round is finished normally. All 4 offensive bags and all 4 defensive bags are thrown, and the result of the down still counts. No new round may begin after the final round is scored.</div><div class="rule"><b>Q1 to Q2:</b> The game continues from the exact same situation. Possession, field position, down, and distance all carry over. The clock resets to 20:00 and there is no kickoff.</div><div class="rule"><b>Halftime:</b> After Q2, the first-half possession ends. Both teams reset to 4 timeouts. The team that received the opening kickoff kicks off to begin the second half, so the team that kicked to start the game receives the Q3 kickoff. The clock stays stopped during the kickoff and return and begins running when the return ends and the new offensive possession starts.</div><div class="rule"><b>Q3 to Q4:</b> Just like Q1 to Q2, possession, field position, down, and distance carry over unchanged. The clock resets to 20:00 and there is no kickoff.</div>'''
-          if old not in r:
-              raise SystemExit('Could not find quarter-break rule')
-          r = r.replace(old, new)
-          rp.write_text(r)
-          PY
-
+      - name: Apply quarter changes
+        run: python3 .github/scripts/update_quarters.py
       - name: Format files
         run: npx --yes prettier@3.3.3 --write index.html rules.html
-
-      - name: Commit updates
+      - name: Commit changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
