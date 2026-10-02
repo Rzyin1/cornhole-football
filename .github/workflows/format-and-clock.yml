@@ -1,4 +1,4 @@
-name: Required thrower selection
+name: Special teams player selection
 
 on:
   push:
@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Require thrower selection each round
+      - name: Add special teams player selection
         run: python3 .github/scripts/update_quarters.py
       - name: Format tracker
         run: npx --yes prettier@3.3.3 --write index.html
@@ -26,6 +26,6 @@ jobs:
           git config user.email github-actions-bot@users.noreply.github.com
           git add index.html
           if ! git diff --cached --quiet; then
-            git commit -m "Require thrower selection before submitting rounds"
+            git commit -m "Require player selection for special teams plays"
             git push
           fi
