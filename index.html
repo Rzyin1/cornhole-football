@@ -549,12 +549,28 @@
       const blankStats = () => [blankStat(), blankStat()];
       const blankPlayerStat = () => ({
         offRounds: 0,
-        offHoles: 0,
-        offBoards: 0,
+        totalYards: 0,
+        firstDowns: 0,
+        touchdowns: 0,
+        longestGain: null,
+        turnovers: 0,
         defRounds: 0,
-        defHoles: 0,
-        defBoards: 0,
-        netYards: 0,
+        yardsAllowed: 0,
+        tacklesForLoss: 0,
+        stops: 0,
+        safeties: 0,
+        kickoffYards: 0,
+        kickReturnYards: 0,
+        kickReturnTD: 0,
+        puntYards: 0,
+        puntReturnYards: 0,
+        puntReturnTD: 0,
+        fieldGoalsMade: 0,
+        fieldGoalsAttempted: 0,
+        patMade: 0,
+        patAttempted: 0,
+        twoPtMade: 0,
+        twoPtAttempted: 0,
       });
       function ensureRoster() {
         if (!Array.isArray(S.roster) || !S.roster.length) {
@@ -578,6 +594,13 @@
         if (!S.playerStats) S.playerStats = {};
         S.roster.forEach((p) => {
           if (!S.playerStats[p.id]) S.playerStats[p.id] = blankPlayerStat();
+          else {
+            let base = blankPlayerStat(),
+              x = S.playerStats[p.id];
+            Object.keys(base).forEach((k) => {
+              if (x[k] == null) x[k] = base[k];
+            });
+          }
         });
       }
       function eligible(team, role) {
@@ -802,40 +825,75 @@
           })
           .join("");
         ensureRoster();
-        if (S.roster.length > 2) {
+        if (S.roster.length) {
           liveStats.innerHTML +=
-            '<div style="width:100%;margin-top:12px"><b>INDIVIDUAL THROWING STATS</b></div>' +
+            '<div style="width:100%;margin-top:12px"><b>INDIVIDUAL PLAYER STATS</b></div>' +
             S.roster
               .map((p) => {
-                let x = S.playerStats[p.id] || blankPlayerStat(),
-                  ob = x.offRounds * 4,
-                  db = x.defRounds * 4;
-                let op = ob ? ((100 * x.offHoles) / ob).toFixed(1) : "0.0",
-                  dp = db ? ((100 * x.defHoles) / db).toFixed(1) : "0.0";
+                let x = S.playerStats[p.id] || blankPlayerStat();
+                let avg = x.offRounds
+                  ? (x.totalYards / x.offRounds).toFixed(2)
+                  : "0.00";
                 return (
                   '<div class="liveplayer"><div class="live-name">' +
                   p.name +
                   " — " +
                   S.names[p.team] +
-                  '</div><div class="livegrid"><div class="liveitem"><b>' +
-                  x.offHoles +
+                  "</div>" +
+                  '<div style="margin:7px 0 4px"><b>OFFENSE</b></div><div class="livegrid">' +
+                  '<div class="liveitem"><b>' +
+                  x.offRounds +
+                  '</b><small>ROUNDS</small></div><div class="liveitem"><b>' +
+                  x.totalYards +
+                  '</b><small>TOTAL YARDS</small></div><div class="liveitem"><b>' +
+                  avg +
+                  '</b><small>YARDS / ROUND</small></div><div class="liveitem"><b>' +
+                  x.firstDowns +
+                  '</b><small>FIRST DOWNS</small></div><div class="liveitem"><b>' +
+                  x.touchdowns +
+                  '</b><small>TOUCHDOWNS</small></div><div class="liveitem"><b>' +
+                  (x.longestGain ?? 0) +
+                  '</b><small>LONGEST GAIN</small></div><div class="liveitem"><b>' +
+                  x.turnovers +
+                  "</b><small>TURNOVERS</small></div></div>" +
+                  '<div style="margin:9px 0 4px"><b>DEFENSE</b></div><div class="livegrid">' +
+                  '<div class="liveitem"><b>' +
+                  x.defRounds +
+                  '</b><small>ROUNDS</small></div><div class="liveitem"><b>' +
+                  x.yardsAllowed +
+                  '</b><small>YARDS ALLOWED</small></div><div class="liveitem"><b>' +
+                  x.tacklesForLoss +
+                  '</b><small>TACKLES FOR LOSS</small></div><div class="liveitem"><b>' +
+                  x.stops +
+                  '</b><small>STOPS / NO GAIN</small></div><div class="liveitem"><b>' +
+                  x.safeties +
+                  "</b><small>SAFETIES</small></div></div>" +
+                  '<div style="margin:9px 0 4px"><b>SPECIAL TEAMS</b></div><div class="livegrid">' +
+                  '<div class="liveitem"><b>' +
+                  x.kickoffYards +
+                  '</b><small>KICKOFF YARDS</small></div><div class="liveitem"><b>' +
+                  x.kickReturnYards +
+                  '</b><small>KICK RETURN YARDS</small></div><div class="liveitem"><b>' +
+                  x.kickReturnTD +
+                  '</b><small>KICK RETURN TD</small></div><div class="liveitem"><b>' +
+                  x.puntYards +
+                  '</b><small>PUNT YARDS</small></div><div class="liveitem"><b>' +
+                  x.puntReturnYards +
+                  '</b><small>PUNT RETURN YARDS</small></div><div class="liveitem"><b>' +
+                  x.puntReturnTD +
+                  '</b><small>PUNT RETURN TD</small></div><div class="liveitem"><b>' +
+                  x.fieldGoalsMade +
                   "/" +
-                  ob +
-                  " (" +
-                  op +
-                  '%)</b><small>OFFENSE HOLES</small></div><div class="liveitem"><b>' +
-                  x.defHoles +
+                  x.fieldGoalsAttempted +
+                  '</b><small>FG MADE / ATT</small></div><div class="liveitem"><b>' +
+                  x.patMade +
                   "/" +
-                  db +
-                  " (" +
-                  dp +
-                  '%)</b><small>DEFENSE HOLES</small></div><div class="liveitem"><b>' +
-                  x.offBoards +
-                  '</b><small>OFFENSE BOARDS</small></div><div class="liveitem"><b>' +
-                  x.defBoards +
-                  '</b><small>DEFENSE BOARDS</small></div><div class="liveitem"><b>' +
-                  x.netYards +
-                  "</b><small>NET OFFENSE YARDS</small></div></div></div>"
+                  x.patAttempted +
+                  '</b><small>PAT MADE / ATT</small></div><div class="liveitem"><b>' +
+                  x.twoPtMade +
+                  "/" +
+                  x.twoPtAttempted +
+                  "</b><small>2PT MADE / ATT</small></div></div></div>"
                 );
               })
               .join("");
@@ -1005,13 +1063,24 @@
         }
         let ops = S.playerStats[op.id],
           dps = S.playerStats[dp.id];
+        let projected = S.ball + dir() * y;
+        let earnsFirst =
+          dir() === 1 ? projected >= S.gain : projected <= S.gain;
+        let scoresTD =
+          (o === 0 && projected >= 100) || (o === 1 && projected <= 0);
+        let scoresSafety =
+          (o === 0 && projected <= 0) || (o === 1 && projected >= 100);
         ops.offRounds++;
-        ops.offHoles += bags.oh;
-        ops.offBoards += bags.ob;
-        ops.netYards += y;
+        ops.totalYards += y;
+        ops.longestGain =
+          ops.longestGain === null ? y : Math.max(ops.longestGain, y);
+        if (earnsFirst && !scoresTD && !scoresSafety) ops.firstDowns++;
+        if (scoresTD) ops.touchdowns++;
         dps.defRounds++;
-        dps.defHoles += bags.dh;
-        dps.defBoards += bags.db;
+        dps.yardsAllowed += y;
+        if (y < 0) dps.tacklesForLoss++;
+        if (y === 0) dps.stops++;
+        if (scoresSafety) dps.safeties++;
         s.offRounds++;
         s.offHoles += bags.oh;
         s.offBoards += bags.ob;
@@ -1054,6 +1123,10 @@
         render();
       }
       function turnover() {
+        let op = document.getElementById("offThrower")
+          ? playerById(offThrower.value)
+          : null;
+        if (op && S.playerStats[op.id]) S.playerStats[op.id].turnovers++;
         snap();
         stop();
         S.stats[1 - S.pos].forcedTurnovers++;
@@ -1127,7 +1200,7 @@
       function startKickReturn(base, label = "Kick Return") {
         kickBase = base;
         kickReturnCount = 0;
-        mode = "kickreturn";
+        mode = label === "Punt Return" ? "puntreturn" : "kickreturn";
         picktitle.textContent = label;
         let ownBase = S.pos === 0 ? base : 100 - base;
         picktext.textContent =
@@ -1153,6 +1226,9 @@
         if (made) {
           s.kickReturnMade++;
           kickReturnCount++;
+          if (mode === "puntreturn")
+            S.playerStats[thrower.id].puntReturnYards += 10;
+          else S.playerStats[thrower.id].kickReturnYards += 10;
           let y = kickBase + (r === 0 ? 1 : -1) * kickReturnCount * 10;
           S.log.push(
             "<b>RETURN:</b> " +
@@ -1164,6 +1240,8 @@
           if ((r === 0 && y >= 100) || (r === 1 && y <= 0)) {
             S.ball = r === 0 ? 100 : 0;
             s.kickReturnTD++;
+            if (mode === "puntreturn") S.playerStats[thrower.id].puntReturnTD++;
+            else S.playerStats[thrower.id].kickReturnTD++;
             S.score[r] += 6;
             S.stats[r].touchdowns++;
             S.lastTD = r;
@@ -1225,6 +1303,7 @@
         S.stats[k].kickoffMade += n;
         S.stats[k].kickoffAtt += 4;
         let ownY = n == 4 ? 1 : 40 - 10 * n;
+        S.playerStats[thrower.id].kickoffYards += 40 - ownY;
         let fieldY = S.pos === 0 ? ownY : 100 - ownY;
         S.log.push(
           "<b>KICKOFF:</b> " +
@@ -1291,6 +1370,8 @@
         s.puntAtt += 4;
         s.puntBoards += boards;
         s.puntYards += dist;
+        if (selectedPunter && S.playerStats[selectedPunter])
+          S.playerStats[selectedPunter].puntYards += dist;
         let raw = S.ball + dir() * dist;
         let puntSpot = p === 0 ? Math.min(99, raw) : Math.max(1, raw);
         S.ball = puntSpot;
@@ -1348,8 +1429,10 @@
         stop();
         let t = S.pos;
         S.stats[t].fieldGoalsAttempted++;
+        S.playerStats[thrower.id].fieldGoalsAttempted++;
         if (ok) {
           S.stats[t].fieldGoalsMade++;
+          S.playerStats[thrower.id].fieldGoalsMade++;
           S.score[t] += 3;
           S.log.push("<b>FIELD GOAL GOOD!</b> " + thrower.name + " +3");
           if (S.ot) {
@@ -1387,6 +1470,14 @@
         if (!thrower) return;
         snap();
         let t = S.lastTD ?? S.pos;
+        let ps = S.playerStats[thrower.id];
+        if (p === 1) {
+          ps.patAttempted++;
+          if (ok) ps.patMade++;
+        } else {
+          ps.twoPtAttempted++;
+          if (ok) ps.twoPtMade++;
+        }
         if (ok) {
           S.score[t] += p;
           S.log.push(
