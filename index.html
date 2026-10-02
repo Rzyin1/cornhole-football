@@ -611,6 +611,27 @@
         ensureRoster();
         return S.roster.find((p) => p.id === id);
       }
+      function specialTeamSelect(team, label) {
+        ensureRoster();
+        return (
+          '<label style="display:block;margin:10px 0 5px">' +
+          label +
+          '</label><select class="name" id="specialThrower"><option value="">Select player...</option>' +
+          S.roster
+            .filter((p) => p.team === team)
+            .map((p) => '<option value="' + p.id + '">' + p.name + "</option>")
+            .join("") +
+          "</select>"
+        );
+      }
+      function requireSpecialThrower() {
+        let el = document.getElementById("specialThrower");
+        if (!el || !el.value) {
+          alert("Select the player making this special-teams throw first.");
+          return null;
+        }
+        return playerById(el.value);
+      }
 
       const fresh = () => ({
         names: ["Team 1", "Team 2"],
@@ -1093,7 +1114,7 @@
         mode = m;
         picktitle.textContent = "Kickoff";
         picktext.textContent = "How many of the four airmails were made?";
-        choices.innerHTML = "";
+        choices.innerHTML = specialTeamSelect(1 - S.pos, "Kickoff Player");
         for (let i = 0; i < 5; i++) {
           let b = document.createElement("button");
           b.className = "btn";
@@ -1119,10 +1140,13 @@
               : "opponent " + (100 - ownBase)) +
           ". Throw airmails one at a time. Each make returns 10 yards. Keep throwing until the first miss.";
         choices.innerHTML =
+          specialTeamSelect(S.pos, label + " Player") +
           '<button class="btn primary" onclick="kickReturnThrow(true)">AIRMAIL MADE</button><button class="btn red" onclick="kickReturnThrow(false)">MISS</button>';
         pick.classList.add("show");
       }
       function kickReturnThrow(made) {
+        let thrower = requireSpecialThrower();
+        if (!thrower) return;
         let r = S.pos,
           s = S.stats[r];
         s.kickReturnAtt++;
@@ -1131,7 +1155,11 @@
           kickReturnCount++;
           let y = kickBase + (r === 0 ? 1 : -1) * kickReturnCount * 10;
           S.log.push(
-            "<b>RETURN:</b> airmail " + kickReturnCount + " made (+10 yards)",
+            "<b>RETURN:</b> " +
+              thrower.name +
+              " airmail " +
+              kickReturnCount +
+              " made (+10 yards)",
           );
           if ((r === 0 && y >= 100) || (r === 1 && y <= 0)) {
             S.ball = r === 0 ? 100 : 0;
@@ -1189,6 +1217,8 @@
         render();
       }
       function airResolve(n) {
+        let thrower = requireSpecialThrower();
+        if (!thrower) return;
         snap();
         stop();
         let k = 1 - S.pos;
@@ -1199,7 +1229,9 @@
         S.log.push(
           "<b>KICKOFF:</b> " +
             S.names[k] +
-            " " +
+            " (" +
+            thrower.name +
+            ") " +
             n +
             "/4 airmails. Return begins at own " +
             ownY,
@@ -1216,7 +1248,7 @@
         picktitle.textContent = "Punt";
         picktext.textContent =
           "How many of the 4 punt bags went in the hole? Each hole is 10 yards.";
-        choices.innerHTML = "";
+        choices.innerHTML = specialTeamSelect(S.pos, "Punter");
         for (let i = 0; i <= 4; i++) {
           let b = document.createElement("button");
           b.className = "btn";
@@ -1226,7 +1258,11 @@
         }
         pick.classList.add("show");
       }
+      let selectedPunter = null;
       function puntPickHoles(n) {
+        let thrower = requireSpecialThrower();
+        if (!thrower) return;
+        selectedPunter = thrower.id;
         puntHoles = n;
         mode = "puntBoards";
         picktitle.textContent = "Punt — Bags on Board";
@@ -1260,6 +1296,8 @@
         S.ball = puntSpot;
         S.log.push(
           "<b>PUNT:</b> " +
+            (playerById(selectedPunter)?.name || "Unknown") +
+            " — " +
             puntHoles +
             " hole" +
             (puntHoles === 1 ? "" : "s") +
@@ -1299,10 +1337,13 @@
         picktext.textContent =
           "One throw for 3 points. Bag must go in the hole.";
         choices.innerHTML =
+          specialTeamSelect(S.pos, "Field Goal Player") +
           '<button class="btn primary" onclick="fgR(true)">GOOD</button><button class="btn red" onclick="fgR(false)">NO GOOD</button>';
         pick.classList.add("show");
       }
       function fgR(ok) {
+        let thrower = requireSpecialThrower();
+        if (!thrower) return;
         snap();
         stop();
         let t = S.pos;
@@ -1310,7 +1351,7 @@
         if (ok) {
           S.stats[t].fieldGoalsMade++;
           S.score[t] += 3;
-          S.log.push("<b>FIELD GOAL GOOD!</b> +3");
+          S.log.push("<b>FIELD GOAL GOOD!</b> " + thrower.name + " +3");
           if (S.ot) {
             if (otPossessionEnded(t, "FG")) return;
           }
@@ -1320,7 +1361,12 @@
           render();
           airmail("kickoff");
         } else {
-          S.log.push("<b>FIELD GOAL NO GOOD.</b> Turnover at " + spotText());
+          S.log.push(
+            "<b>FIELD GOAL NO GOOD.</b> " +
+              thrower.name +
+              ". Turnover at " +
+              spotText(),
+          );
           if (S.ot && otPossessionEnded(t, null)) return;
           switchPos();
           closeM("pick");
@@ -1330,18 +1376,34 @@
       function conversion() {
         picktitle.textContent = "Conversion";
         picktext.textContent = "Choose the conversion result.";
+        let t = S.lastTD ?? S.pos;
         choices.innerHTML =
+          specialTeamSelect(t, "Conversion Player") +
           '<button class="btn" onclick="conv(1,true)">PAT Good</button><button class="btn red" onclick="conv(1,false)">PAT Miss</button><button class="btn" onclick="conv(2,true)">2PT Good</button><button class="btn red" onclick="conv(2,false)">2PT Miss</button>';
         pick.classList.add("show");
       }
       function conv(p, ok) {
+        let thrower = requireSpecialThrower();
+        if (!thrower) return;
         snap();
         let t = S.lastTD ?? S.pos;
         if (ok) {
           S.score[t] += p;
-          S.log.push("<b>" + (p == 1 ? "PAT" : "2-POINT") + " GOOD</b> +" + p);
+          S.log.push(
+            "<b>" +
+              (p == 1 ? "PAT" : "2-POINT") +
+              " GOOD</b> " +
+              thrower.name +
+              " +" +
+              p,
+          );
         } else
-          S.log.push("<b>" + (p == 1 ? "PAT" : "2-POINT") + " NO GOOD</b>");
+          S.log.push(
+            "<b>" +
+              (p == 1 ? "PAT" : "2-POINT") +
+              " NO GOOD</b> " +
+              thrower.name,
+          );
         S.pos = 1 - t;
         S.kick = true;
         closeM("pick");
